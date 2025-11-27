@@ -1,0 +1,279 @@
+import cv2
+import numpy as np
+from datetime import datetime
+import random
+
+class FacePersonaOverlay:
+    def __init__(self):
+        # Initialize face detection
+        self.face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        )
+        
+        # Initialize eye and smile detection for expressions
+        self.eye_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_eye.xml'
+        )
+        self.smile_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_smile.xml'
+        )
+        
+        # Persona themes with colors and effects
+        self.personas = {
+            'cyber': {'color': (0, 255, 255), 'name': 'CYBER AGENT'},
+            'nature': {'color': (0, 255, 0), 'name': 'EARTH GUARDIAN'},
+            'fire': {'color': (0, 100, 255), 'name': 'FLAME WARRIOR'},
+            'ice': {'color': (255, 150, 0), 'name': 'FROST MAGE'},
+            'void': {'color': (200, 0, 200), 'name': 'VOID WALKER'}
+        }
+        
+        self.current_persona = 'cyber'
+        self.particle_effects = []
+        self.current_expression = "NEUTRAL"
+        self.expression_history = []
+    
+    def detect_expression(self, face_gray, face_roi):
+        """Detect facial expression based on features"""
+        x, y, w, h = face_roi
+        
+        # Detect eyes in face region
+        eyes = self.eye_cascade.detectMultiScale(
+            face_gray[y:y+h, x:x+w],
+            scaleFactor=1.1,
+            minNeighbors=10,
+            minSize=(20, 20)
+        )
+        
+        # Detect smile in lower half of face
+        mouth_roi = face_gray[y+int(h/2):y+h, x:x+w]
+        smiles = self.smile_cascade.detectMultiScale(
+            mouth_roi,
+            scaleFactor=1.8,
+            minNeighbors=20,
+            minSize=(25, 25)
+        )
+        
+        # Analyze features to determine expression
+        expression = "NEUTRAL"
+        confidence = 0
+        
+        if len(smiles) > 0:
+            expression = "HAPPY"
+            confidence = min(len(smiles) * 30, 99)
+        elif len(eyes) == 2:
+            # Both eyes detected - likely neutral or focused
+            expression = "FOCUSED"
+            confidence = 85
+        elif len(eyes) == 0:
+            # No eyes detected - might be looking down (sad) or eyes closed
+            expression = "SAD"
+            confidence = 70
+        elif len(eyes) == 1:
+            # One eye detected - might be winking or partially occluded
+            expression = "CURIOUS"
+            confidence = 60
+        
+        # Smooth expression changes with history
+        self.expression_history.append(expression)
+        if len(self.expression_history) > 10:
+            self.expression_history.pop(0)
+        
+        # Use most common expression from history
+        if len(self.expression_history) >= 5:
+            most_common = max(set(self.expression_history), 
+                            key=self.expression_history.count)
+            if self.expression_history.count(most_common) >= 3:
+                expression = most_common
+        
+        self.current_expression = expression
+        return expression, confidence, len(eyes), len(smiles)
+    
+    def generate_particles(self, x, y, w, h):
+        """Generate particle effects around face"""
+        # More particles for happy expression
+        threshold = 0.5 if self.current_expression == "HAPPY" else 0.7
+        
+        if random.random() > threshold:
+            color = self.personas[self.current_persona]['color']
+            
+            # Change particle behavior based on expression
+            if self.current_expression == "HAPPY":
+                vx = random.uniform(-3, 3)
+                vy = random.uniform(-4, -2)  # Upward for happy
+            elif self.current_expression == "SAD":
+                vx = random.uniform(-1, 1)
+                vy = random.uniform(1, 3)  # Downward for sad
+            else:
+                vx = random.uniform(-2, 2)
+                vy = random.uniform(-2, 2)
+            
+            particle = {
+                'x': x + random.randint(0, w),
+                'y': y + random.randint(0, h),
+                'vx': vx,
+                'vy': vy,
+                'life': 30,
+                'color': color
+            }
+            self.particle_effects.append(particle)
+    
+    def update_particles(self, frame):
+        """Update and draw particle effects"""
+        new_particles = []
+        for p in self.particle_effects:
+            p['x'] += p['vx']
+            p['y'] += p['vy']
+            p['life'] -= 1
+            
+            if p['life'] > 0:
+                alpha = p['life'] / 30.0
+                size = int(3 * alpha)
+                cv2.circle(frame, (int(p['x']), int(p['y'])), 
+                          size, p['color'], -1)
+                new_particles.append(p)
+        
+        self.particle_effects = new_particles
+    
+    def draw_persona_overlay(self, frame, x, y, w, h, expression, confidence, eyes, smiles):
+        """Draw AI persona overlay on detected face"""
+        color = self.personas[self.current_persona]['color']
+        name = self.personas[self.current_persona]['name']
+        
+        # Draw face border with glow effect
+        thickness = 3
+        for i in range(3):
+            alpha_color = tuple(int(c * (1 - i * 0.3)) for c in color)
+            offset = i * 2
+            cv2.rectangle(frame, 
+                         (x - offset, y - offset), 
+                         (x + w + offset, y + h + offset),
+                         alpha_color, thickness - i)
+        
+        # Draw corner accents
+        corner_len = 20
+        cv2.line(frame, (x, y), (x + corner_len, y), color, 4)
+        cv2.line(frame, (x, y), (x, y + corner_len), color, 4)
+        cv2.line(frame, (x + w, y), (x + w - corner_len, y), color, 4)
+        cv2.line(frame, (x + w, y), (x + w, y + corner_len), color, 4)
+        cv2.line(frame, (x, y + h), (x + corner_len, y + h), color, 4)
+        cv2.line(frame, (x, y + h), (x, y + h - corner_len), color, 4)
+        cv2.line(frame, (x + w, y + h), (x + w - corner_len, y + h), color, 4)
+        cv2.line(frame, (x + w, y + h), (x + w, y + h - corner_len), color, 4)
+        
+        # Draw persona name
+        cv2.putText(frame, name, (x, y - 10),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        
+        # Draw scan line effect
+        scan_y = (y + int((datetime.now().timestamp() * 100) % h))
+        cv2.line(frame, (x, scan_y), (x + w, scan_y), color, 1)
+        
+        # Expression-based color for stats
+        expr_colors = {
+            "HAPPY": (0, 255, 0),
+            "SAD": (255, 100, 100),
+            "FOCUSED": (255, 255, 0),
+            "CURIOUS": (255, 150, 0),
+            "NEUTRAL": (200, 200, 200)
+        }
+        expr_color = expr_colors.get(expression, (200, 200, 200))
+        
+        # Draw stats HUD with expression
+        cv2.putText(frame, f"POWER: {random.randint(85, 99)}%", 
+                   (x, y + h + 25),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        cv2.putText(frame, f"STATUS: ACTIVE", 
+                   (x, y + h + 45),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        
+        # Draw expression with confidence
+        cv2.putText(frame, f"EMOTION: {expression}", 
+                   (x, y + h + 65),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, expr_color, 2)
+        cv2.putText(frame, f"CONFIDENCE: {confidence}%", 
+                   (x, y + h + 85),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, expr_color, 1)
+        
+        # Draw feature detection info
+        cv2.putText(frame, f"EYES: {eyes} | SMILE: {smiles}", 
+                   (x, y + h + 105),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
+        
+        # Generate particles
+        self.generate_particles(x, y, w, h)
+    
+    def run(self):
+        """Main loop for face detection and overlay"""
+        cap = cv2.VideoCapture(0)
+        
+        if not cap.isOpened():
+            print("Error: Could not open webcam")
+            return
+        
+        print("AI Face Persona Overlay Active!")
+        print("Controls:")
+        print("  1-5: Switch persona")
+        print("  Q: Quit")
+        print("\nExpression Detection:")
+        print("  Try smiling, frowning, or looking away!")
+        
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            # Flip frame for mirror effect
+            frame = cv2.flip(frame, 1)
+            
+            # Convert to grayscale for detection
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            
+            # Detect faces
+            faces = self.face_cascade.detectMultiScale(
+                gray, scaleFactor=1.1, minNeighbors=5, minSize=(100, 100)
+            )
+            
+            # Draw overlays for each face
+            for (x, y, w, h) in faces:
+                # Detect expression for this face
+                expression, confidence, eyes, smiles = self.detect_expression(
+                    gray, (x, y, w, h)
+                )
+                self.draw_persona_overlay(frame, x, y, w, h, 
+                                         expression, confidence, eyes, smiles)
+            
+            # Update and draw particles
+            self.update_particles(frame)
+            
+            # Draw UI
+            cv2.putText(frame, "AI PERSONA SYSTEM", (10, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            cv2.putText(frame, f"Mode: {self.current_persona.upper()}", 
+                       (10, 60),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, 
+                       self.personas[self.current_persona]['color'], 2)
+            
+            # Display frame
+            cv2.imshow('AI Face Persona Overlay', frame)
+            
+            # Handle keyboard input
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                break
+            elif key == ord('1'):
+                self.current_persona = 'cyber'
+            elif key == ord('2'):
+                self.current_persona = 'nature'
+            elif key == ord('3'):
+                self.current_persona = 'fire'
+            elif key == ord('4'):
+                self.current_persona = 'ice'
+            elif key == ord('5'):
+                self.current_persona = 'void'
+        
+        cap.release()
+        cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    overlay = FacePersonaOverlay()
+    overlay.run()
