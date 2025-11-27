@@ -19,3 +19,15 @@ This project uses Python and OpenCV to detect your face from the webcam and add 
 ## Controls
 - Press 1–5 to change persona
 - Press Q to quit the program
+
+  ## Requirements
+- Python 3.x
+- OpenCV (`pip install opencv-python`)
+- NumPy (`pip install numpy`)
+  
+## Built With
+- Python
+- OpenCV
+- NumPy
+- Haar Cascades for face/eye/smile detection
+
